@@ -1,0 +1,67 @@
+##??װpRRpphetic??
+BiocManager::install(c('sva','car','genefilter','preprocessCore','ridge'))
+wget -O pRRophetic_0.5.tar.gz https://osf.io/dwzce/?action=download
+install.packages("pRRophetic_0.5.tar.gz",repos=NULL,dependencies=TRUE)
+##??װRTOOLS
+writeLines('PATH="${RTOOLS40_HOME}\\usr\\bin;${PATH}"', con = "~/.Renviron")
+Sys.which("make")
+chooseBioCmirror()
+
+
+# load R package
+library(pRRophetic)
+library(ggplot2)
+library(ggpubr)
+library(SimDesign)
+library(cowplot)
+library(dplyr)
+library(GSVA)
+library(limma)
+library(stringr)
+
+# set color
+jco <- c("#2874C5","#EABF00","#868686","#C6524A","#80A7DE")
+
+# load data
+expr <- read.table("symbol.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+gene <- read.table("genelist.txt",sep = "\t",row.names = NULL,check.names = F,stringsAsFactors = F,header = F)
+ciber <- read.table("CIBERSORT.result.txt",sep = "\t",row.names = 1,check.names = F,stringsAsFactors = F,header = T)
+
+
+
+for (i in gene$V1) {
+  message(paste0("analysis of ",i," starts..."))
+  subexpr <- as.numeric(expr[i,])
+  names(subexpr) <- colnames(expr)
+  
+  lsam <- names(subexpr[subexpr < median(subexpr)])
+  hsam <- names(subexpr[subexpr >= median(subexpr)])
+  
+  # immune correlation
+  dat <- as.numeric(expr[i,]); names(dat) <- colnames(expr)
+  comsam <- intersect(names(dat), rownames(ciber))
+  tmp1 <- dat[comsam]
+  tmp2 <- ciber[comsam,]
+  
+  var <- colnames(ciber)
+  data <- data.frame(var)
+  for (j in 1:length(var)){
+    test <- cor.test(as.numeric(tmp2[,j]),tmp1,method = "spearman") # you could change to pearson if you want
+    data[j,2] <- test$estimate                                            
+    data[j,3] <- test$p.value
+  }
+  names(data) <- c("symbol","correlation","pvalue")
+  data <- as.data.frame(na.omit(data))
+  data %>% 
+    filter(pvalue <0.05) %>%  # if you want to filter non-significant cells, remove the # sign
+    ggplot(aes(correlation,forcats::fct_reorder(symbol,correlation))) +
+    geom_segment(aes(xend=0,yend=symbol)) +
+    geom_point(aes(col=pvalue,size=abs(correlation))) +
+    scale_colour_gradientn(colours=c("#7fc97f","#984ea3")) +
+    scale_size_continuous(range =c(2,8))  +
+    theme_minimal() +
+    ylab(NULL)
+  ggsave(paste0("correlation between cibersort and expression of ", i,".pdf"),width = 8,height = 6)
+  
+
+}
