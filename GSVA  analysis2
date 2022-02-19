@@ -1,0 +1,101 @@
+
+
+4.library(msigdbr)
+library(dplyr)
+library(data.table)
+library(GSVA)
+library(limma)
+library(stringr)
+library(ggplot2)
+
+Sys.setenv(LANGUAGE = "en") 
+options(stringsAsFactors = FALSE) 
+msigdbr_show_species()
+
+
+h <- msigdbr(species = "Homo sapiens", 
+             category = "H") 
+h <- select(h, gs_name, gene_symbol) %>% 
+  as.data.frame %>% 
+  split(., .$gs_name) %>% 
+  lapply(., function(x)(x$gene_symbol)) 
+
+
+gs <- lapply(h, unique)
+
+
+count <- table(unlist(gs))
+keep <- names(which(table(unlist(gs)) < 2))
+gs <- lapply(gs, function(x) intersect(keep, x))
+
+gs <- gs[lapply(gs, length) > 0]
+
+head(gs)
+
+save(gs, file = "hallmark.gs.RData")
+(load("hallmark.gs.RData"))
+
+gsym.expr <- read.csv("easy_input_expr.csv", row.names = 1)
+head(gsym.expr)
+
+gsva_es <- gsva(as.matrix(gsym.expr), gs)
+head(gsva_es)
+write.csv(gsva_es, "gsva_output.csv", quote = F)                                            
+                                                                                            
+group_list <- data.frame(sample = colnames(gsva_es), group = c(rep("a", 14), rep("b", 14))) 
+head(group_list)                                                                            
+
+
+design <- model.matrix(~ 0 + factor(group_list$group))
+colnames(design) <- levels(factor(group_list$group))
+rownames(design) <- colnames(gsva_es)
+design
+
+contrast.matrix <- makeContrasts(b-a, levels = design)
+
+fit <- lmFit(gsva_es, design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+x <- topTable(fit2, coef = 1, n = Inf, adjust.method = "BH", sort.by = "P")
+head(x)
+write.csv(x, "gsva_limma.csv", quote = F)
+
+pathway <- str_replace(row.names(x), "HALLMARK_", "")
+df <- data.frame(ID = pathway, score = x$t)
+write.csv(df, "easy_input2_for39bar.csv", quote = F, row.names = F)
+
+
+df <- read.csv("easy_input2_for39bar.csv")
+head(df)
+
+cutoff <- 1
+df$group <- cut(df$score, breaks = c(-Inf, -cutoff, cutoff, Inf),labels = c(1,2,3))
+
+sortdf <- df[order(df$score),]
+sortdf$ID <- factor(sortdf$ID, levels = sortdf$ID)
+head(sortdf)
+
+ggplot(sortdf, aes(ID, score, fill = group)) + geom_bar(stat = 'identity') + 
+  coord_flip() + 
+  scale_fill_manual(values = c('palegreen3', 'snow3', 'dodgerblue4'), guide = FALSE) + 
+  
+  geom_hline(yintercept = c(-cutoff,cutoff), 
+             color="white",
+             linetype = 2, 
+             size = 0.3) + 
+  geom_text(data = subset(df, score < 0),
+            aes(x=ID, y= 0, label= paste0(" ", ID), color = group),
+            size = 3, 
+            hjust = "inward" ) +  
+  geom_text(data = subset(df, score > 0),
+            aes(x=ID, y= -0.1, label=ID, color = group),
+            size = 3, hjust = "outward") +  
+  scale_colour_manual(values = c("black","snow3","black"), guide = FALSE) +
+  
+  xlab("") +ylab("t value of GSVA score, tumor \n versus non-malignant")+
+  theme_bw() + 
+  theme(panel.grid =element_blank()) + 
+  theme(panel.border = element_rect(size = 0.6)) + 
+  theme(axis.line.y = element_blank(), axis.ticks.y = element_blank(), axis.text.y = element_blank()) 
+
+ggsave("gsva.pdf", width = 6, height = 8)
