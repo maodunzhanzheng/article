@@ -1,0 +1,61 @@
+logFoldChange=1                                      
+adjustP=0.05
+
+library(limma)
+
+rt=read.table("symbol.txt",sep="\t",header=T,check.names=F)
+rt=as.matrix(rt)
+rownames(rt)=rt[,1]
+exp=rt[,2:ncol(rt)]
+dimnames=list(rownames(exp),colnames(exp))
+rt=matrix(as.numeric(as.matrix(exp)),nrow=nrow(exp),dimnames=dimnames)
+rt=avereps(rt)
+rt=normalizeBetweenArrays(as.matrix(rt))
+dat1 <- as.matrix(rt)
+dat1 <- pmax(dat1,0)*2
+rt=log2(dat1+1)
+#rt=log2(rt+1)
+
+#differential
+modType=c(rep("con",19),rep("treat",9))                      ###########################更改对照组和实验组的数目
+design <- model.matrix(~0+factor(modType))
+colnames(design) <- c("con","treat")
+fit <- lmFit(rt,design)
+cont.matrix<-makeContrasts(treat-con,levels=design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+allDiff=topTable(fit2,adjust='fdr',number=200000)
+write.table(allDiff,file="limmaTab.xls",sep="\t",quote=F)
+
+#write table
+diffSig <- allDiff[with(allDiff, (abs(logFC)>logFoldChange & P.Value < adjustP )), ]
+write.table(diffSig,file="diff.xls",sep="\t",quote=F)
+diffUp <- allDiff[with(allDiff, (logFC>logFoldChange & P.Value  < adjustP )), ]
+write.table(diffUp,file="up.xls",sep="\t",quote=F)
+diffDown <- allDiff[with(allDiff, (logFC<(-logFoldChange) & P.Value  < adjustP )), ]
+write.table(diffDown,file="down.xls",sep="\t",quote=F)
+
+#write expression level of diff gene
+hmExp=rt[rownames(diffSig),]
+diffExp=rbind(id=colnames(hmExp),hmExp)
+write.table(diffExp,file="heatmap.txt",sep="\t",quote=F,col.names=F)
+
+#volcano
+tiff(file="vol.tiff",
+       width = 12,            #图片的宽度
+       height =12,            #图片的高度
+       units ="cm",
+       compression="lzw",
+       bg="white",
+       res=600)
+xMax=max(-log10(allDiff$P.Value ))
+yMax=max(abs(allDiff$logFC))
+plot(-log10(allDiff$P.Value ), allDiff$logFC, xlab="-log10(P.Value )",ylab="logFC",
+     main="Volcano", xlim=c(0,xMax),ylim=c(-yMax,yMax),yaxs="i",pch=20, cex=0.8)
+diffSub=subset(allDiff, P.Value <adjustP & logFC>logFoldChange)
+points(-log10(diffSub$P.Value ), diffSub$logFC, pch=20, col="red",cex=0.8)
+diffSub=subset(allDiff, P.Value <adjustP & logFC<(-logFoldChange))
+points(-log10(diffSub$P.Value ), diffSub$logFC, pch=20, col="green",cex=0.8)
+abline(h=0,lty=2,lwd=3)
+dev.off()
